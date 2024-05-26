@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgl - teapot buffer geometry</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+	</head>
+	<body>
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> - the Utah Teapot<br />
+			from <a href="https://www.udacity.com/course/interactive-3d-graphics--cs291" target="_blank" rel="noopener">Udacity Interactive 3D Graphics</a>
+		</div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+
+			import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+			import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+			import { TeapotGeometry } from 'three/addons/geometries/TeapotGeometry.js';
+			import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+
+
+			let camera, scene, renderer;
+			let cameraControls;
+			let effectController;
+			const teapotSize = 300;
+			let ambientLight, light;
+
+			let tess = - 1;	// force initialization
+			let bBottom;
+			let bLid;
+			let bBody;
+			let bFitLid;
+			let bNonBlinn;
+			let shading;
+
+			let teapot, textureCube;
+			const materials = {};
+
+
+
+			init();
+			render();
+
+			function init() {
+				const container = document.createElement( 'div' );
+				document.body.appendChild( container );
+
+				const canvasWidth = window.innerWidth;
+				const canvasHeight = window.innerHeight;
+
+				// CAMERA
+				camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 80000 );
+				camera.position.set( - 600, 550, 1300 );
+
+				// LIGHTS
+				ambientLight = new THREE.AmbientLight( 0x7c7c7c, 3.0 );
+
+				light = new THREE.DirectionalLight( 0xFFFFFF, 3.0 );
+				light.position.set( 0.32, 0.39, 0.7 );
+
+				// RENDERER
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( canvasWidth, canvasHeight );
+				container.appendChild( renderer.domElement );
+
+				// EVENTS
+				window.addEventListener( 'resize', onWindowResize );
+
+				// CONTROLS
+				//cameraControls = new OrbitControls( camera, renderer.domElement );
+				//cameraControls.addEventListener( 'change', render );
+
+				// TEXTURE MAP
+				const textureMap = new THREE.TextureLoader().load( 'textures/uv_grid_opengl.jpg' );
+				textureMap.wrapS = textureMap.wrapT = THREE.RepeatWrapping;
+				textureMap.anisotropy = 16;
+				textureMap.colorSpace = THREE.SRGBColorSpace;
+
+				// REFLECTION MAP
+				const path = 'textures/cube/pisa/';
+				const urls = [ 'px.png', 'nx.png', 'py.png', 'ny.png', 'pz.png', 'nz.png' ];
+
+				textureCube = new THREE.CubeTextureLoader().setPath( path ).load( urls );
+
+				materials[ 'wireframe' ] = new THREE.MeshBasicMaterial( { wireframe: true } );
+				materials[ 'flat' ] = new THREE.MeshPhongMaterial( { specular: 0x000000, flatShading: true, side: THREE.DoubleSide } );
+				materials[ 'smooth' ] = new THREE.MeshLambertMaterial( { side: THREE.DoubleSide } );
+				materials[ 'glossy' ] = new THREE.MeshPhongMaterial( { side: THREE.DoubleSide } );
+				materials[ 'textured' ] = new THREE.MeshPhongMaterial( { map: textureMap, side: THREE.DoubleSide } );
+				materials[ 'reflective' ] = new THREE.MeshPhongMaterial( { envMap: textureCube, side: THREE.DoubleSide } );
+
+				// scene itself
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0xAAAAAA );
+
+				scene.add( ambientLight );
+				scene.add( light );
+
+
+				const loader = new FBXLoader();
+				let crosshair;
+				loader.load( 'my_meshes/sheet_frame.fbx', function ( object ) {
+						object.traverse( function ( child ) {
+							if ( child.isMesh ) {
+								child.castShadow = true;
+								child.receiveShadow = true;
+							}
+						} );
+						
+						//object.scale.set(0.01, 0.01, 0.01);
+						crosshair = object;
+						scene.add( object );
+						//camera.add(crosshair)
+						let camerapos = camera.position.clone();
+						crosshair.position.set( camerapos.x, camerapos.y, camerapos.z - 100);
+						
+						camera.add(crosshair);
+						scene.add(camera);
+						crosshair.scale.set(10, 10, 10);
+						crosshair.position.set(0,0,-1000);
+
+						render();
+				} );
+
+				// sphere
+				/*
+				const geometry = new THREE.SphereGeometry( 100, 64, 32 );
+				const material = new THREE.MeshBasicMaterial( { color: 0x0000FF } );
+				const sphere = new THREE.Mesh( geometry, material );
+				scene.add( sphere );*/
+				// GUI
+				setupGui();
+
+				window.cameraref = camera;
+				
+				function moveCameraXYZ(delta_x,delta_y,delta_z) {
+					let pos = new THREE.Vector3();
+					pos = camera.position.clone();
+
+					const forwardVector = new THREE.Vector3();
+					camera.getWorldDirection(forwardVector);
+					console.log("Camera forward vector: ", forwardVector);
+
+					const rightVector = new THREE.Vector3(1, 0, 0);
+					rightVector.applyQuaternion(camera.quaternion);
+					
+					const upVector = new THREE.Vector3(0, 1, 0);
+					upVector.applyQuaternion(camera.quaternion);
+
+					pos.add(forwardVector.multiplyScalar(delta_z));
+					pos.add(rightVector.multiplyScalar(delta_x));
+					pos.add(upVector.multiplyScalar(delta_y));
+
+					camera.position.set( pos.x, pos.y, pos.z );
+					render();
+				}
+
+				function pitchCamera(angle) {
+					camera.rotateX(angle);
+					render();
+				}
+
+				function yawCamera(angle) {
+					camera.rotateY(angle);
+					render();
+				}
+				let generalPivot = undefined;
+				let placableModel = undefined;
+
+				function setGeneralPivotAtCrosshair(){
+					console.log("setGeneralPivotAtCrosshair");
+
+					if(generalPivot == undefined){
+						console.log("general pivot is undefined");
+
+						loader.load('my_meshes/sheet_frame.fbx', function (object) {
+							console.log("loading frame");
+							object.traverse(function (child) {
+								if (child.isMesh) {
+									child.castShadow = true;
+									child.receiveShadow = true;
+								}
+							});
+
+							generalPivot = object;
+
+							let camerapos = camera.position.clone();
+							generalPivot.position.set(camerapos.x, camerapos.y, camerapos.z - 100);
+							object.scale.set(1, 1, 1);
+
+							scene.add(generalPivot);
+
+							console.log("generalPivot must be defined now", generalPivot);
+
+							let sphere;
+							const geometry = new THREE.SphereGeometry(100, 64, 32);
+							const material = new THREE.MeshBasicMaterial({ color: 0x0000FF });
+							sphere = new THREE.Mesh(geometry, material);
+							scene.add(sphere);
+							generalPivot.add(sphere);
+							sphere.position.set(0, 0, 0);
+							sphere.scale.set(0.1, 0.1, 0.1);
+
+							// Code that depends on generalPivot being defined
+							updateGeneralPivotPosition();
+
+							render();
+						});
+					} else {
+						updateGeneralPivotPosition();
+					}
+				}
+
+				function updateGeneralPivotPosition() {
+					let camera_matrix = camera.matrixWorld;
+					let camera_global_forward = new THREE.Vector3(0, 0, -1);
+					camera_global_forward.applyMatrix4(camera_matrix);
+
+					let camerapos = camera.position.clone();
+					generalPivot.position.set(camerapos.x, camerapos.y, camerapos.z - 100);
+					generalPivot.scale.set(10, 10, 10);
+					generalPivot.quaternion.set(0, 0, 0, 1);
+					generalPivot.applyMatrix4(camera_matrix);
+
+					let v_camera_to_cross_local = crosshair.position.clone();
+					let v_camera_to_cross_global = v_camera_to_cross_local.clone().applyMatrix4(camera.matrixWorld);
+
+					generalPivot.position.set(v_camera_to_cross_global.x, v_camera_to_cross_global.y, v_camera_to_cross_global.z);
+
+					console.log("generalPivot pos: ", generalPivot.position.x, generalPivot.position.y, generalPivot.position.z);
+
+					render();
+				}
+
+				function prepareNewModel(model_path, model_camera_position, model_scale){
+					let default_model_path = 'my_meshes/turtle.fbx';
+					let default_model_camera_position = new THREE.Vector3(0,-500,-10000);
+					let default_model_scale = new THREE.Vector3(10, 10, 10);
+
+					if(model_path == undefined)
+						model_path = default_model_path;
+
+					if(model_camera_position == undefined)
+						model_camera_position = default_model_camera_position;
+
+					if(model_scale == undefined)
+						model_scale = default_model_scale;
+
+					loader.load( model_path, function ( object ) {
+							object.traverse( function ( child ) {
+								if ( child.isMesh ) {
+									child.castShadow = true;
+									child.receiveShadow = true;
+								}
+							} );
+							
+							//object.scale.set(0.01, 0.01, 0.01);
+							placableModel = object;
+							scene.add( object );
+							//camera.add(crosshair)
+							let camerapos = camera.position.clone();
+							placableModel.position.set( camerapos.x, camerapos.y, camerapos.z - 100);
+							
+							camera.add(placableModel);
+							scene.add(camera);
+							placableModel.scale.set(10, 10, 10);
+							placableModel.position.set(0,-500,-10000);
+
+							render();
+					} );
+				}
+				function placeModelAtTheWorldPositionButKeepWorldPosition() {
+					if (!placableModel) {
+						console.log("No model to place.");
+						return;
+					}
+
+					// Step 1: Calculate the current world position of the model
+					const worldPosition = new THREE.Vector3();
+					const worldRotation = new THREE.Quaternion();
+					placableModel.getWorldPosition(worldPosition);
+					placableModel.getWorldQuaternion(worldRotation);
+
+					// Step 2: Remove the model from the camera
+					camera.remove(placableModel);
+
+					// Step 3: Add the model to the scene
+					scene.add(placableModel);
+
+					// Step 4: Set the model's position to the calculated world position
+					placableModel.position.copy(worldPosition);
+					placableModel.quaternion.copy(worldRotation);
+					
+					// !!!TODO!!!
+					generalPivot.attach(placableModel); 
+					// placableModel.position.copy(worldPosition);
+					// placableModel.quaternion.copy(worldRotation);			
+
+					render();
+					console.log("Model placed at the world position: ", worldPosition);
+				}
+
+				// KEY LISTENER
+				document.addEventListener('keydown', function(event) {
+					if (event.key === 'w')
+						moveCameraXYZ(0,0,5);
+					if(event.key === 'W')
+						moveCameraXYZ(0,0,50);
+					if (event.key === 's')
+						moveCameraXYZ(0,0,-5);
+					if(event.key === 'S')
+						moveCameraXYZ(0,0,-50);
+					if (event.key === 'a')
+						moveCameraXYZ(-5,0,0);
+					if (event.key === 'A')
+						moveCameraXYZ(-50,0,0);
+					if (event.key === 'd')
+						moveCameraXYZ(5,0,0);
+					if (event.key === 'D')
+						moveCameraXYZ(50,0,0);
+					if (event.key === 'q')
+						moveCameraXYZ(0,-5,0);
+					if (event.key === 'Q')
+						moveCameraXYZ(0,-50,0);
+					if (event.key === 'e')
+						moveCameraXYZ(0,5,0);
+					if (event.key === 'E')
+						moveCameraXYZ(0,50,0);
+					if (event.key === 'r') {
+						camera.position.set( 0, 0, 1300 );
+						camera.quaternion.set(0, 0, 0, 1);
+						render();
+					}
+					if (event.key === 'ArrowUp') {
+						pitchCamera(0.1);
+					}
+					if (event.key === 'ArrowDown') {
+						pitchCamera(-0.1);
+					}
+					if (event.key === 'ArrowLeft') {
+						yawCamera(0.1);
+					}
+					if (event.key === 'ArrowRight') {
+						yawCamera(-0.1);
+					}
+					if (event.key === 'c') {
+						camera.add(crosshair);
+						scene.add(camera);
+						crosshair.scale.set(10, 10, 10);
+						crosshair.position.set(0,0,-1000);
+						
+						render();
+					}
+					if(event.key === 'x'){
+						camera.remove(crosshair);
+						scene.add(crosshair);
+
+						crosshair.position.set(0,0,-1000);
+						crosshair.scale.set(10, 10, 10);
+
+						render();
+					}
+					if(event.key === ' '){
+						console.log("set general pivot");
+						setGeneralPivotAtCrosshair();
+					}
+					if(event.key === 't'){
+						console.log("prepare new model");
+						prepareNewModel();
+					}
+					if(event.key === 'y'){
+						console.log("attach model to general pivot but keep current world position");
+						placeModelAtTheWorldPositionButKeepWorldPosition();
+					}
+				});
+				
+			}
+
+			
+
+
+			
+			// EVENT HANDLERS
+
+			function onWindowResize() {
+
+				const canvasWidth = window.innerWidth;
+				const canvasHeight = window.innerHeight;
+
+				renderer.setSize( canvasWidth, canvasHeight );
+
+				camera.aspect = canvasWidth / canvasHeight;
+				camera.updateProjectionMatrix();
+
+				render();
+
+			}
+
+			function setupGui() {
+
+				effectController = {
+					newTess: 15,
+					bottom: true,
+					lid: true,
+					body: true,
+					fitLid: false,
+					nonblinn: false,
+					newShading: 'glossy'
+				};
+
+				const gui = new GUI();
+				gui.add( effectController, 'newTess', [ 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 40, 50 ] ).name( 'Tessellation Level' ).onChange( render );
+				gui.add( effectController, 'lid' ).name( 'display lid' ).onChange( render );
+				gui.add( effectController, 'body' ).name( 'display body' ).onChange( render );
+				gui.add( effectController, 'bottom' ).name( 'display bottom' ).onChange( render );
+				gui.add( effectController, 'fitLid' ).name( 'snug lid' ).onChange( render );
+				gui.add( effectController, 'nonblinn' ).name( 'original scale' ).onChange( render );
+				gui.add( effectController, 'newShading', [ 'wireframe', 'flat', 'smooth', 'glossy', 'textured', 'reflective' ] ).name( 'Shading' ).onChange( render );
+
+			}
+
+
+			//
+
+			function render() {
+
+				if ( effectController.newTess !== tess ||
+					effectController.bottom !== bBottom ||
+					effectController.lid !== bLid ||
+					effectController.body !== bBody ||
+					effectController.fitLid !== bFitLid ||
+					effectController.nonblinn !== bNonBlinn ||
+					effectController.newShading !== shading ) {
+
+					tess = effectController.newTess;
+					bBottom = effectController.bottom;
+					bLid = effectController.lid;
+					bBody = effectController.body;
+					bFitLid = effectController.fitLid;
+					bNonBlinn = effectController.nonblinn;
+					shading = effectController.newShading;
+
+					createNewTeapot();
+
+				}
+
+				// skybox is rendered separately, so that it is always behind the teapot.
+				if ( shading === 'reflective' ) {
+
+					scene.background = textureCube;
+
+				} else {
+
+					scene.background = null;
+
+				}
+
+				renderer.render( scene, camera );
+
+			}
+
+			// Whenever the teapot changes, the scene is rebuilt from scratch (not much to it).
+			function createNewTeapot() {
+
+				if ( teapot !== undefined ) {
+
+					teapot.geometry.dispose();
+					scene.remove( teapot );
+
+				}
+
+				const geometry = new TeapotGeometry( teapotSize,
+					tess,
+					effectController.bottom,
+					effectController.lid,
+					effectController.body,
+					effectController.fitLid,
+					! effectController.nonblinn );
+
+				teapot = new THREE.Mesh( geometry, materials[ shading ] );
+
+				scene.add( teapot );
+
+			}
+
+		</script>
+
+	</body>
+</html>
