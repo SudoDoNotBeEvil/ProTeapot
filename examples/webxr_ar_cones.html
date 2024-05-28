@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js ar - cones</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+		<link type="text/css" rel="stylesheet" href="main.css">
+
+		<link type="text/css" rel="stylesheet" href="./proteapot/styles/proteapot_hud_menu.css">
+	</head>
+	<body>
+		<div class="buttons_panel">
+			<button class="hud_button" id="hud_save_button"> Save </button>
+			<button class="hud_button" id="hud_load_button"> Load </button>
+			<button class="hud_button" id="hud_pivot_button"> Pivot </button>
+			<button class="hud_button" id="hud_model_button"> Model </button>
+		</div>
+
+		<div id="info">
+			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> ar - cones<br/>(Chrome Android 81+)
+		</div>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+			import { ARButton } from 'three/addons/webxr/ARButton.js';
+			
+			import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+			import { debug_camera_controller } from './proteapot/scripts/debug_camera_controller.js';
+			import { xrobj_spwnr } from './proteapot/scripts/xrobj_spwnr.js';
+			//import { xr_objects_spawner}
+
+			let camera, scene, renderer;
+			let controller;
+			let global_pivot_placed = false;
+
+			init();
+
+			function init() {
+				const container = document.createElement( 'div' );
+				document.body.appendChild( container );
+
+				scene = new THREE.Scene();
+
+				camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 1000 /*!!! fix clipping planes !!!*/);
+
+				let debug_camera_controller_instance = new debug_camera_controller(camera, 0.1);
+				let xrobj_spwnr_instance = new xrobj_spwnr(camera, scene);
+
+				const light = new THREE.HemisphereLight( 0xffffff, 0xbbbbff, 3 );
+				light.position.set( 0.5, 1, 0.25 );
+				scene.add( light );
+
+				//
+
+				renderer = new THREE.WebGLRenderer( { antialias: true, alpha: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				renderer.setAnimationLoop( animate );
+				renderer.xr.enabled = true;
+				container.appendChild( renderer.domElement );
+
+				//
+
+				document.body.appendChild( ARButton.createButton( renderer,
+					{
+						optionalFeatures: [ 'dom-overlay', 'dom-overlay-for-handheld-ar' ],
+						domOverlay: { root: document.body }
+					}
+				 ) );
+
+				//
+				const geometry = new THREE.CylinderGeometry( 0, 0.05, 0.2, 32 ).rotateX( Math.PI / 2 );
+
+				const loader = new FBXLoader();
+				let crosshair;
+				let general_pivot;
+				// let placableModel;
+
+				function load_crosshair_frame(){
+					loader.load( './proteapot/meshes/sheet_frame.fbx', function ( object ) {
+						object.traverse( function ( child ) {
+							if ( child.isMesh ) {
+								child.castShadow = true;
+								child.receiveShadow = true;
+							}
+						} );
+						
+						//object.scale.set(0.01, 0.01, 0.01);
+						crosshair = object;
+						scene.add( object );
+						//camera.add(crosshair)
+						let camerapos = camera.position.clone();
+						crosshair.position.set( camerapos.x, camerapos.y, camerapos.z - 100);
+						
+						camera.add(crosshair);
+						scene.add(camera);
+						crosshair.scale.set(1, 1, 1);
+						crosshair.position.set(0,0,-0.6);
+					} );
+				}
+
+				function place_general_pivot_at_crosshair() {
+					if(general_pivot === undefined){
+						loader.load('./proteapot/meshes/sheet_frame.fbx', function (object) {
+							//!!!TODO: rewrite this part!!!! vvvv
+							object.traverse(function (child) {
+								if (child.isMesh) {
+									child.castShadow = true;
+									child.receiveShadow = true;
+								}
+							});
+
+							general_pivot = object;
+
+							let camerapos = camera.position.clone();
+							general_pivot.position.set(camerapos.x, camerapos.y, camerapos.z - 0.3);
+							general_pivot.scale.set(1, 1, 1);
+							general_pivot.quaternion.set(0, 0, 0, 1);
+							general_pivot.applyMatrix4(camera.matrixWorld);
+
+							let v_camera_to_cross_local = crosshair.position.clone();
+							let v_camera_to_cross_global = v_camera_to_cross_local.clone().applyMatrix4(camera.matrixWorld);
+
+							general_pivot.position.set(v_camera_to_cross_global.x, v_camera_to_cross_global.y, v_camera_to_cross_global.z);
+							console.log( "General pivot placed at: ", general_pivot.position );
+							//!!!TODO: rewrite this part!!!! ^^^^
+							scene.add(general_pivot);
+
+							update_general_pivot_position();
+						});
+					}
+					
+					update_general_pivot_position();
+				}
+				
+				function update_general_pivot_position(){
+					if(general_pivot === undefined){
+						console.log("General pivot not instantiated yet");
+						return;
+					}
+
+					let camerapos = camera.position.clone();
+					general_pivot.position.set(camerapos.x, camerapos.y, camerapos.z - 0.3);
+					general_pivot.scale.set(1, 1, 1);
+					general_pivot.quaternion.set(0, 0, 0, 1);
+					general_pivot.applyMatrix4(camera.matrixWorld);
+
+					let v_camera_to_cross_local = crosshair.position.clone();
+					let v_camera_to_cross_global = v_camera_to_cross_local.clone().applyMatrix4(camera.matrixWorld);
+
+					general_pivot.position.set(v_camera_to_cross_global.x, v_camera_to_cross_global.y, v_camera_to_cross_global.z);
+					console.log( "General pivot placed at: ", general_pivot.position );
+					//!!!TODO: rewrite this part!!!! ^^^^
+					scene.add(general_pivot);
+					
+					global_pivot_placed = true;
+				}
+/*
+				function prepare_placable_model(model_path, model_camera_position, model_scale) {
+					if(general_pivot === undefined){
+						console.log("General pivot not placed yet");
+						return;
+					}
+
+					abort_current_placement();
+
+					let default_model_path = 'my_meshes/turtle.fbx';
+					let default_model_camera_position = new THREE.Vector3(0,-500,-10000);
+					let default_model_scale = new THREE.Vector3(1, 1, 1);
+					
+					if(model_path == undefined)
+						model_path = default_model_path;
+
+					if(model_camera_position == undefined)
+						model_camera_position = default_model_camera_position;
+
+					if(model_scale == undefined)
+						model_scale = default_model_scale;
+
+
+					loader.load(model_path, function (object) {
+						object.traverse( function ( child ) {
+								if ( child.isMesh ) {
+									child.castShadow = true;
+									child.receiveShadow = true;
+								}
+						});
+
+						placableModel = object;
+						scene.add( object );
+
+						let camerapos = camera.position.clone();
+						//what the hell is going on with coordinates here again?
+						camera.add(placableModel);
+						scene.add(camera);
+						placableModel.scale.set(model_scale.x, model_scale.y, model_scale.z);
+						placableModel.position.set(model_camera_position.x, model_camera_position.y, model_camera_position.z);
+						
+						placableModel.position.set( 0, -0.2, -1);
+						placableModel.scale.set(0.001, 0.001, 0.001);
+					});
+				}
+
+				function place_placable_model_at_world_position_keeping_its_orientation(){
+					if(placableModel === undefined){
+						console.log("Placable model not prepared yet");
+						return;
+					}
+
+					const worldPosition = new THREE.Vector3();
+					const worldRotation = new THREE.Quaternion();
+					placableModel.getWorldPosition(worldPosition);
+					placableModel.getWorldQuaternion(worldRotation);
+
+					camera.remove(placableModel);
+					scene.add(placableModel);
+
+					placableModel.position.copy(worldPosition);
+					placableModel.quaternion.copy(worldRotation);
+					
+					console.log("Placable model placed at pos: ", worldPosition);
+					console.log("Placable model placed at rot: ", worldRotation);
+
+					general_pivot.attach(placableModel); 
+				}*/
+
+				function onSelect(){
+					console.log("onSelect");
+				}
+
+				const button = document.getElementById('hud_pivot_button');
+				button.addEventListener('click', onPivotButtonClicked);
+				//document.body.appendChild(button);
+
+				const model_button = document.getElementById('hud_model_button');
+				model_button.addEventListener('click', onModelButtonClicked);
+
+				const save_button = document.getElementById('hud_save_button');
+				save_button.addEventListener('click', onSaveButtonClicked);
+				
+				const load_button = document.getElementById('hud_load_button');
+				load_button.addEventListener('click', onLoadButtonClicked);
+
+				function onPivotButtonClicked() {
+					if(crosshair === undefined){
+						load_crosshair_frame();
+						return;
+					}
+
+					//if(general_pivot === undefined) {
+					place_general_pivot_at_crosshair();
+					//}
+				}
+
+				let test_model_config_json = {
+					"id": 399157038872002763,
+					"name": "Turtle 1",
+					"model_path": './proteapot/meshes/mill.fbx',
+				};
+
+				
+				let test_load_data = {
+					"xr_objects": [
+						{
+							"id": 399157038872002750,
+							"name": "Teapot",
+							"pos": [0, 0.3, 0],
+							"rot": [0, 0, 0, 1],
+							"scale": [1, 1, 1]
+						},
+						{
+							"id": 399157038872002750,
+							"name": "Teapot",
+							"pos": [0, 0, 10],
+							"rot": [0, 0, 0, 1],
+							"scale": [1, 1, 1]
+						}
+					]
+				};
+				
+				//	"model_camera_position": new THREE.Vector3(0, -500, -10000),
+				//	"model_scale": new THREE.Vector3(1, 1, 1)
+
+				function onSaveButtonClicked() {
+					let save_data_ret = xrobj_spwnr_instance.get_save_data();
+
+					console.log("save_data_ret" + save_data_ret);
+					console.log(JSON.stringify(save_data_ret, null, 2));
+				}
+
+				function onLoadButtonClicked() {
+					xrobj_spwnr_instance.load_data(test_load_data);
+				}
+
+				function onModelButtonClicked() {
+					if(!xrobj_spwnr_instance.isPlacementInProgress() && global_pivot_placed){
+						xrobj_spwnr_instance.prepare_placement(general_pivot, test_model_config_json);
+					}
+					else{
+						xrobj_spwnr_instance.place_current_model();
+					}
+						
+					// }
+					// else{
+					// 	console.log("Placement in progress or general pivot not placed yet");
+					// }
+					// if(placableModel === undefined){
+					// 	prepare_placable_model();
+					// } else{
+					// 	place_placable_model_at_world_position_keeping_its_orientation();
+					// }
+
+				}
+
+				controller = renderer.xr.getController( 0 );
+				controller.addEventListener( 'select', onSelect );
+				scene.add( controller );
+
+				window.addEventListener( 'resize', onWindowResize );
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			//
+
+			function animate() {
+
+				renderer.render( scene, camera );
+
+			}
+
+		</script>
+	</body>
+</html>
